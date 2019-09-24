@@ -1,0 +1,11 @@
+---
+lookback: 5
+forward: 3
+layerdim: 4
+hiddenunit: 128
+save: True
+input: data/data.h5 
+output: output/output
+epochs: 50
+batch: 128
+learningrate: 0.001
