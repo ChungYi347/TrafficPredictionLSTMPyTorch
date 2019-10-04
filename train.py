@@ -1,7 +1,7 @@
 from __future__ import print_function
 import os
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+os.environ["CUDA_VISIBLE_DEVICES"]="0"
 
 import csv, os
 import numpy as np
@@ -16,7 +16,7 @@ torch.manual_seed(1)
 from torch.utils.data import Dataset, DataLoader
 from torch.autograd import Variable
 
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import argparse
 import yaml
 from time import gmtime, strftime
@@ -36,12 +36,13 @@ def create_dataset(dataset, look_back=1, forward=1):
     return np.array(dataX), np.array(dataY)
 
 class LSTMModel(nn.Module):
-    def __init__(self, input_dim, hidden_unit, layer_dim, output_dim):
+    def __init__(self, input_dim, hidden_unit, layer_dim, output_dim, dropout=0.2):
         super(LSTMModel, self).__init__()
         self.hidden_unit = hidden_unit
         self.layer_dim = layer_dim
+        self.dropout = dropout
         
-        self.lstm = nn.LSTM(input_dim, hidden_unit, layer_dim).cuda()
+        self.lstm = nn.LSTM(input_dim, hidden_unit, layer_dim, dropout=dropout).cuda()
         self.fc = nn.Linear(hidden_unit, output_dim).cuda()
     
     def forward(self, x):
@@ -52,13 +53,14 @@ class LSTMModel(nn.Module):
         return output
 
 class LSTMModel2(nn.Module):
-    def __init__(self, input_dim, hidden_unit, layer_dim, output_dim):
+    def __init__(self, input_dim, hidden_unit, layer_dim, output_dim, dropout=0.2):
         super(LSTMModel2, self).__init__()
         self.hidden_unit = hidden_unit
         self.layer_dim = layer_dim
         
         self.layers = nn.ModuleList([nn.LSTMCell(input_dim if l == 0 else hidden_unit, hidden_unit).cuda() for l in range(layer_dim)])
         self.layers.append(nn.Linear(hidden_unit, output_dim).cuda())
+        self.layers.append(nn.ReLU())
     
     def forward(self, x):
         x = torch.transpose(x, 1, 0)
@@ -85,6 +87,7 @@ class LSTMModel3(nn.Module):
         self.bias = nn.ParameterList([nn.Parameter(torch.Tensor(hidden_unit * 4).cuda()) for i in range(layer_dim)])
 
         self.fc = nn.Linear(hidden_unit, output_dim).cuda()
+        self.relu = nn.ReLU()
 
         for p in self.parameters():
             if p.ndimension() < 2:
@@ -154,6 +157,7 @@ def main(args):
 
         # Normalization
         scaler = MinMaxScaler(feature_range=(0, 1))
+        #scaler = StandardScaler()
         dataset = scaler.fit_transform(df.values)
         X, y = create_dataset(dataset, look_back=look_back, forward=forward)
         print(np.array(X).shape, np.array(y).shape)
@@ -174,10 +178,12 @@ def main(args):
         # Build LSTM model
         # layer_dim : number of LSTM layers
         #model = mLSTMModel(X.shape[-1], hidden_unit, layer_dim, X.shape[-1])
-        model = LSTMModel3(X.shape[-1], hidden_unit, layer_dim, X.shape[-1])
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        model = LSTMModel(X.shape[-1], hidden_unit, layer_dim, X.shape[-1])
+        optimizer = torch.optim.Adam(model.parameters())
         loss_fn = torch.nn.MSELoss()
 
+        for p in model.parameters():
+            print(p.shape)
 
         for t in range(epochs):
             for i, data in enumerate(train_loader):
